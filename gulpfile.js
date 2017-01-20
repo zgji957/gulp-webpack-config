@@ -20,10 +20,12 @@ var replace = require('gulp-replace');
 var minifyHtml = require('gulp-minify-html');
 var gulpif = require('gulp-if');
 var webpack = require('webpack');
+var cdnizer = require("gulp-cdnizer");
+var replace = require('gulp-url-replace');
 // 获取 webpack 配置文件
 var webpackConfig = require("./webpack.config.js");
 
-var condition = true;
+var condition = false; //false为开发环境，true为生产环境
 
 /*
  * 加载任务模块
@@ -47,10 +49,6 @@ gulp.task('sass', function() {
     gulp.src('./static/sass/**/*.scss') //该任务针对的文件
         .pipe(sass()) //该任务调用的模块
         .pipe(minifyCSS())
-        //.pipe(rename(function(path){
-        //    path.basename+=".min";
-        //    path.extname=".css"
-        //}))
         .pipe(gulp.dest('./dist/css'));
 });
 
@@ -93,10 +91,10 @@ gulp.task('rev', function() {
             replaceReved: true
         }))
         .pipe(gulpif(
-            condition, minifyHtml({
-                empty: true,
-                spare: true,
-                quotes: true
+            false, minifyHtml({
+                empty: false,
+                spare: false,
+                quotes: false
             })
         ))
         .pipe(gulp.dest('./views'));
@@ -120,14 +118,6 @@ gulp.task('base64', function() {
         .pipe(gulp.dest("./dist/css/"));
 });
 
-//替换文件内容任务
-gulp.task('replace', function() {
-    gulp.src('./views/**/*.html')
-        .pipe(replace(/( ?v=[^ "]*")/g, '"'))
-        .pipe(gulp.dest('./views'));
-});
-
-
 // webpack任务
 gulp.task("webpack", function(callback) {
     var myConfig = Object.create(webpackConfig);
@@ -139,15 +129,86 @@ gulp.task("webpack", function(callback) {
         });
 });
 
-
-// 正式环境
-gulp.task('autoMD5', function(done) {
-    runSequence(
-        ['clean'], ['webpack', 'sass'], ['cssRev', 'jsRev'], ['rev'],
-        done);
+//替换rev内容
+gulp.task('replaceRev', function() {
+    gulp.src('./rev/**/*.json')
+        // .pipe(replace(/( ?v=[^ "]*")/g, '"'))
+        .pipe(replace(/-([a-zA-Z0-9])*/g, ''))
+        .pipe(gulp.dest('./rev/'));
 });
 
-// 开发环境
+//CDN
+gulp.task('htmlCDN', function() {
+    var cdn = "http://teenagertestcdn.speakhi.com/front";
+    var version = "/1.4.5";
+    if (!condition) {
+        cdn = "";
+        version = "";
+    }
+    return gulp.src('./views/**/*.html')
+        .pipe(cdnizer({
+            defaultCDNBase: cdn,
+            // allowRev: true,
+            // allowMin: true,
+            files: [{
+                    file: '**/dist/js/**/*.js',
+                    cdn: cdn + "/web/dist/js" + version + "/${ filename }"
+                },
+                {
+                    file: '**/dist/css/**/*.css',
+                    cdn: cdn + "/web/dist/css" + version + "/${ filename }"
+                },
+                {
+                    file: '/web/static/images/**/*.{gif,png,jpg,jpeg}',
+                    // cdn: "http://teenagertestcdn.speakhi.com/front/web/dist/css/1.4.2/${ filename }"
+                }
+            ]
+        }))
+        .pipe(gulp.dest('./views/'));
+});
+
+gulp.task('cssCDN', function() {
+    return gulp.src('./dist/css/**/*.css')
+        // return gulp.src('test.scss')
+        .pipe(cdnizer({
+            allowRev: true,
+            allowMin: true,
+            defaultCDNBase: "http://teenagertestcdn.speakhi.com/front/",
+            // relativeRoot: 'css',
+            files: [{
+                file: '**/web/static/images/**/*.{gif,png,jpg,jpeg}'
+                    // cdn: 'http://teenagertestcdn.speakhi.com/front/static/images/${ version }/${ filename }'
+            }, {
+                file: '**/web/static/fonts/sh-fonts.eot?bn7vxo'
+            }, {
+                file: '**/web/static/fonts/sh-fonts.eot'
+            }, {
+                file: '**/web/static/fonts/sh-fonts.ttf?bn7vxo'
+            }, {
+                file: '**/web/static/fonts/sh-fonts.ttf'
+            }, {
+                file: '**/web/static/fonts/sh-fonts.woff?bn7vxo'
+            }, {
+                file: '**/web/static/fonts/sh-fonts.woff'
+            }, {
+                file: '**/web/static/fonts/sh-fonts.svg?bn7vxo#icomoon'
+            }, {
+                file: '**/web/static/fonts/sh-fonts.svg'
+            }, {
+                file: '**/web/static/fonts/iconfont.woff'
+            }, {
+                file: '**/web/static/fonts/iconfont.ttf'
+            }, {
+                file: '**/web/static/fonts/iconfont.eot'
+            }, {
+                file: '**/web/static/fonts/iconfont.svg'
+            }]
+        }))
+        .pipe(gulp.dest('./dist/css/'));
+    // .pipe(gulp.dest('./'));
+});
+
+//自动检测文件变化
 gulp.task('auto', function() {
     condition = false;
     gulp.watch('./static/js/**/*.js', ['webpack']);
@@ -155,10 +216,25 @@ gulp.task('auto', function() {
     gulp.watch('./static/sass/**/*.scss', ['sass']);
 });
 
+// 正式环境
+gulp.task('build', function(done) {
+    condition = true;
+    runSequence(
+        // ['clean'], ['webpack', 'sass'], ['cssRev', 'jsRev'], ['rev'], ['htmlCDN', 'cssCDN'],
+        ['clean'], ['webpack', 'sass'], ['cssCDN'], ['htmlCDN'],
+        done);
+});
+
+// 开发环境
+gulp.task('develop', function(done) {
+    runSequence(
+        ['auto'],
+        done);
+});
 
 // 使用 gulp.task('default') 定义默认任务
 // 在命令行使用 gulp 启动 script 任务和 auto 任务
-gulp.task('default', ['webpack', 'sass', 'replace', 'auto']);
+gulp.task('default', ['webpack', 'sass', 'auto']);
 
 
 /*
